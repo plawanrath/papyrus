@@ -1,0 +1,10 @@
+books/
+working/
+cache/
+.venv/
+.tools/
+.papyrus.env
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store

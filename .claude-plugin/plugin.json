@@ -1,0 +1,11 @@
+{
+  "name": "papyrus",
+  "displayName": "Papyrus",
+  "version": "0.1.0",
+  "description": "Turn arxiv papers (and other sources) into Kindle-ready epub books via an editorial pipeline of subagents.",
+  "author": {
+    "name": "Plawan Rath"
+  },
+  "license": "Apache-2.0",
+  "keywords": ["arxiv", "epub", "kindle", "pandoc", "research", "papers"]
+}

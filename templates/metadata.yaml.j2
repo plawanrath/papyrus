@@ -1,0 +1,12 @@
+---
+title: {{ title | tojson }}
+{% if subtitle %}subtitle: {{ subtitle | tojson }}{% endif %}
+author: {{ authors | tojson }}
+date: {{ date }}
+language: en-US
+rights: "Compiled by papyrus from open-access preprints. Each paper retains its original license; see source list."
+publisher: "papyrus"
+description: {{ description | tojson }}
+cover-image: cover.png
+toc-title: "Contents"
+...

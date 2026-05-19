@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Shim that execs the plugin's venv Python with .papyrus.env sourced.
+# All Python scripts and hooks invoke this instead of system python3 so the
+# plugin has its own dependency set regardless of the user's shell environment.
+set -e
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -f "$HERE/.papyrus.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$HERE/.papyrus.env"
+  set +a
+fi
+if [ ! -x "$HERE/.venv/bin/python" ]; then
+  echo "papyrus-python: .venv not found. Run ./setup.sh first." >&2
+  exit 1
+fi
+exec "$HERE/.venv/bin/python" "$@"

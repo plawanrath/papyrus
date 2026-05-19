@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 {{ width }} {{ height }}"
+     width="{{ width }}" height="{{ height }}">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1f2e"/>
+      <stop offset="100%" stop-color="#0a0d14"/>
+    </linearGradient>
+    <linearGradient id="band" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#d4a373"/>
+      <stop offset="100%" stop-color="#b08968"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="{{ width }}" height="{{ height }}" fill="url(#bg)"/>
+
+  <!-- Decorative top rule -->
+  <rect x="120" y="240" width="{{ width - 240 }}" height="6" fill="url(#band)"/>
+
+  <!-- Title -->
+  <foreignObject x="120" y="600" width="{{ width - 240 }}" height="900">
+    <div xmlns="http://www.w3.org/1999/xhtml"
+         style="font-family: 'Georgia','Cambria',serif; color:#f4ecd8; text-align:center;
+                font-size:120px; font-weight:bold; line-height:1.1;">
+      {{ title }}
+    </div>
+  </foreignObject>
+
+  <!-- Subtitle -->
+  {% if subtitle %}
+  <foreignObject x="180" y="1650" width="{{ width - 360 }}" height="400">
+    <div xmlns="http://www.w3.org/1999/xhtml"
+         style="font-family: 'Georgia','Cambria',serif; color:#d4a373; text-align:center;
+                font-size:54px; font-style:italic; line-height:1.3;">
+      {{ subtitle }}
+    </div>
+  </foreignObject>
+  {% endif %}
+
+  <!-- Decorative bottom rule -->
+  <rect x="120" y="{{ height - 320 }}" width="{{ width - 240 }}" height="6" fill="url(#band)"/>
+
+  <!-- Byline -->
+  <foreignObject x="120" y="{{ height - 260 }}" width="{{ width - 240 }}" height="200">
+    <div xmlns="http://www.w3.org/1999/xhtml"
+         style="font-family: 'Helvetica','Arial',sans-serif; color:#a8a89a; text-align:center;
+                font-size:40px; letter-spacing:6px; text-transform:uppercase;">
+      {{ byline }}
+    </div>
+  </foreignObject>
+</svg>

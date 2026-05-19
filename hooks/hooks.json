@@ -1,0 +1,23 @@
+{
+  "Stop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/papyrus-python\" \"${CLAUDE_PLUGIN_ROOT}/scripts/open_books_dir.py\""
+        }
+      ]
+    }
+  ],
+  "SubagentStop": [
+    {
+      "matcher": "editorial-voice",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/papyrus-python\" \"${CLAUDE_PLUGIN_ROOT}/scripts/notify.py\" --title Papyrus --message \"Synthesis complete\""
+        }
+      ]
+    }
+  ]
+}

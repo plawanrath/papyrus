@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -25,51 +26,131 @@ import epubcheck_runner
 import render_cover
 
 
-def assemble_manuscript(wd: mf.Workdir) -> Path:
-    """Produce build/manuscript.md by concatenating preface + ordered parsed sections.
+CITATION_RE = re.compile(r"\[([0-9]{4}\.[0-9]{4,5}(?:v\d+)?|doi-[a-z0-9\-]+|[a-z0-9_-]{4,})\]", re.IGNORECASE)
 
-    If build/manuscript.md already exists (created by a higher-level skill), keep it.
+
+def assemble_manuscript(wd: mf.Workdir) -> Path:
+    """Produce build/manuscript.md from sources of truth on every run.
+
+    Default (narrative) mode: preface + chapters in outline order + bibliography.
+    Falls back to anthology mode (preface + parsed papers + bibliography) only
+    when no synthesized chapters exist — that path keeps single-paper
+    /epub-build working without going through the full pipeline.
+
+    Always regenerates: the manuscript is a derived artifact. If you want to
+    hand-edit the book body, edit build/preface.md or build/chapters/*.md.
     """
     out = wd.build_dir() / "manuscript.md"
-    if out.exists() and out.stat().st_size > 0:
-        return out
 
     pieces: list[str] = []
     preface = wd.build_dir() / "preface.md"
     if preface.exists():
         pieces.append(preface.read_text(encoding="utf-8").rstrip() + "\n")
 
-    ordering_path = wd.build_dir() / "ordering.json"
-    ordering = None
-    if ordering_path.exists():
-        try:
-            ordering = json.loads(ordering_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            ordering = None
-
-    if ordering and isinstance(ordering.get("sections"), list):
-        for section in ordering["sections"]:
-            title = section.get("title", "").strip()
-            theme = section.get("theme", "").strip()
-            transition = section.get("transition_in", "").strip()
-            if title:
-                pieces.append(f"\n# {title}\n")
-            if transition:
-                pieces.append(transition + "\n")
-            elif theme:
-                pieces.append(f"*{theme}*\n")
-            for pid in section.get("papers", []):
-                _append_paper(pieces, wd, pid)
+    chapters = _ordered_chapters(wd)
+    if chapters:
+        for chapter_path in chapters:
+            pieces.append("")
+            pieces.append(chapter_path.read_text(encoding="utf-8").rstrip() + "\n")
     else:
-        # No editorial ordering yet — fall back to manifest order.
-        for src in wd.manifest.get("sources", []):
-            _append_paper(pieces, wd, src["id"])
+        # Anthology fallback: no synthesized chapters. Inline parsed papers in
+        # the order specified by ordering.json (legacy) or manifest order.
+        ordering_path = wd.build_dir() / "ordering.json"
+        ordering = None
+        if ordering_path.exists():
+            try:
+                ordering = json.loads(ordering_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                ordering = None
+        if ordering and isinstance(ordering.get("sections"), list):
+            for section in ordering["sections"]:
+                title = section.get("title", "").strip()
+                if title:
+                    pieces.append(f"\n# {title}\n")
+                for pid in section.get("papers", []):
+                    _append_paper(pieces, wd, pid)
+        else:
+            for src in wd.manifest.get("sources", []):
+                _append_paper(pieces, wd, src["id"])
+
+    bib = _build_bibliography(wd)
+    if bib:
+        pieces.append("")
+        pieces.append(bib)
 
     out.write_text("\n".join(pieces), encoding="utf-8")
     return out
 
 
+def _ordered_chapters(wd: mf.Workdir) -> list[Path]:
+    """Return chapter files in outline order.
+
+    Chapter files are named build/chapters/<NN>-<slug>.md. We prefer the
+    outline's order; if no outline exists, sort by the NN prefix.
+    """
+    chapters_dir = wd.build_dir() / "chapters"
+    if not chapters_dir.is_dir():
+        return []
+    available = sorted(chapters_dir.glob("*.md"))
+    if not available:
+        return []
+
+    outline_path = wd.build_dir() / "outline.json"
+    if outline_path.exists():
+        try:
+            outline = json.loads(outline_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            outline = None
+        if outline and isinstance(outline.get("chapters"), list):
+            by_index: dict[int, Path] = {}
+            for p in available:
+                stem = p.stem
+                if "-" in stem:
+                    head = stem.split("-", 1)[0]
+                    try:
+                        by_index[int(head)] = p
+                    except ValueError:
+                        continue
+            ordered: list[Path] = []
+            for i in range(len(outline["chapters"])):
+                if i in by_index:
+                    ordered.append(by_index[i])
+            if ordered:
+                return ordered
+
+    return available
+
+
+def _build_bibliography(wd: mf.Workdir) -> str:
+    """Emit a Markdown bibliography section from the manifest.
+
+    Sources are listed in the order they appear in the manifest. Entries
+    include title, authors, URL, and the canonical source_id (so inline
+    citations like `[2401.12345]` map cleanly to a bibliography entry).
+    """
+    sources = wd.manifest.get("sources") or []
+    if not sources:
+        return ""
+    lines = ["# Bibliography\n"]
+    for src in sources:
+        sid = src.get("id", "")
+        title = (src.get("title") or sid).strip()
+        authors = ", ".join(src.get("authors") or []) or "Unknown authors"
+        url = (src.get("url") or "").strip()
+        # Use [sid] as the anchor label so inline `[sid]` citations match.
+        entry = f"- **[{sid}]** {authors}. *{title}*."
+        if url:
+            entry += f" [{url}]({url})"
+        lines.append(entry)
+    return "\n".join(lines) + "\n"
+
+
 def _append_paper(pieces: list[str], wd: mf.Workdir, source_id: str) -> None:
+    """Anthology-mode helper: append a parsed paper as its own section.
+
+    Used only when build_epub falls back to anthology mode (no synthesized
+    chapters present).
+    """
     parsed = wd.parsed_dir() / f"{source_id}.md"
     if not parsed.exists():
         pieces.append(f"\n## {source_id}\n\n*(source not yet parsed)*\n")

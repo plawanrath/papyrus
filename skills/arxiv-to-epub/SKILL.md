@@ -1,12 +1,17 @@
 ---
-description: Build a Kindle-ready epub from a list of arxiv IDs. Fetches, summarizes papers in parallel via subagents, synthesizes with an editorial voice, curates figures, then assembles the epub.
+description: Build a narrative technical book (Kindle-ready epub) from a list of arxiv IDs. Fetches papers, summarizes them in parallel, designs a chapter outline, writes each chapter as synthesized prose (drawing on multiple papers, not reprinting them), curates figures, then assembles the epub. The output is a book that teaches the territory, not an anthology of papers.
 argument-hint: "<id> [<id>...] [--name <slug>] [--persona <persona>]"
 allowed-tools: Bash, Read, Write, Task
 ---
 
-This is the full pipeline. Given a list of arxiv IDs, you produce a polished
-epub in `books/<slug>/book.epub`. Subagents do the heavy lifting; the
-orchestrator's context only holds structured summaries, never full paper text.
+This is the full pipeline. Given a list of arxiv IDs (or DOIs / IEEE / ACM /
+raw-LaTeX URLs), you produce a polished epub at `books/<slug>/book.epub`.
+
+**This is NOT an anthology.** The book's body is *not* the original papers
+stitched together. Chapter-writer subagents synthesize across papers to
+produce narrative technical prose that teaches concepts; the original papers
+appear only as bibliography entries. If you find yourself appending parsed
+paper markdown verbatim into the book, you've taken a wrong turn.
 
 ## Inputs
 
@@ -16,12 +21,15 @@ orchestrator's context only holds structured summaries, never full paper text.
 - Optional `--name <slug>` — book slug.
 - Optional `--persona <persona>` — editorial persona (default `curator`).
 
-## Steps
+## Pipeline
 
 ### 1. Setup the workdir
 
 Parse `$ARGUMENTS`. Determine the slug (use `--name` if provided; otherwise
-default to `book-<YYYY-MM-DD>`). For each ID, run:
+default to `book-<YYYY-MM-DD>`). Determine the persona path:
+`${CLAUDE_PLUGIN_ROOT}/templates/personas/<persona>.md`.
+
+For each ID, run:
 
 ```bash
 PLUGIN="${CLAUDE_PLUGIN_ROOT}"
@@ -33,52 +41,75 @@ WD="$PLUGIN/working/<slug>"
     --name "<book title>" --persona "<persona>"
 ```
 
-Cache hits are silent. Read `$WD/manifest.json` once to confirm sources.
+Cache hits are silent. Read `$WD/manifest.json` to confirm sources.
 
 ### 2. Parse each paper to markdown
 
-For each source in the manifest (or just the freshly-fetched ones, if
-re-running on a draft):
+For each source in the manifest:
 
 ```bash
 "$PY" "$PLUGIN/scripts/pandoc_to_markdown.py" --workdir "$WD" --id "<source_id>"
 ```
 
-These can be run in a single Bash block sequentially; pandoc is fast.
+These can run sequentially in a single Bash block; pandoc is fast.
 
-### 3. Summarize papers in parallel (subagent dispatch)
+### 3. Summarize papers in parallel (paper-summarizer subagents)
 
-**This is the critical step for keeping the orchestrator's context lean.**
-Issue **N Task tool calls in a single assistant message** — one per source —
-each invoking the `paper-summarizer` subagent. Each Task prompt should include
-the workdir, source_id, and the path to `parsed/<id>.md`. Example prompt body:
+**Issue N Task tool calls in a single assistant message** — one per source —
+each invoking the `paper-summarizer` subagent. Each Task prompt should
+include the workdir, source_id, and the path to `parsed/<id>.md`. Example:
 
-> Summarize the paper at `<workdir>/parsed/<id>.md`. Write the result to
-> `<workdir>/summaries/<id>.json` using the structured schema. The source_id is
-> `<id>`. Return one line confirming.
+> Summarize the paper at `<workdir>/parsed/<id>.md`. Write the structured
+> result to `<workdir>/summaries/<id>.json`. The source_id is `<id>`.
 
-Wait for all subagent calls to complete. Each writes its own
-`summaries/<id>.json` directly to disk; you don't need to read their return
-values beyond the confirmation lines.
+Each subagent writes its own `summaries/<id>.json` to disk. Wait for all to
+complete. **Do not read full paper text yourself** — the whole point of this
+step is to keep paper bodies out of the orchestrator context.
 
-### 4. Synthesize with editorial-voice (single subagent call)
+### 4. Design the book outline (editorial-voice subagent — single call)
 
-Read each `summaries/<id>.json` (small files), inline their contents into a
-single Task call to `editorial-voice`. Pass:
-- The workdir path.
-- The persona slug (resolves to `${CLAUDE_PLUGIN_ROOT}/templates/personas/<persona>.md`).
-- The book title.
-- The contents of every summary, inlined.
+Read each `summaries/<id>.json` (small files) and inline their contents into
+a single Task call to `editorial-voice`. Pass:
 
-editorial-voice writes `build/preface.md` and `build/ordering.json`.
+- `workdir` — the path.
+- `persona_path` — `${CLAUDE_PLUGIN_ROOT}/templates/personas/<persona>.md`.
+- `title` — book title.
+- Each summary, inlined, with its source_id labeled.
 
-### 5. Curate figures (single subagent call)
+editorial-voice writes:
+- `build/preface.md` — the book's opening essay.
+- `build/outline.json` — the chapter outline. Each chapter is a *concept*
+  (not a paper), with `title`, `concept`, `sources` (the papers feeding it),
+  and `transition_in`.
 
-Dispatch `figure-curator` with the workdir path. It reads the ordering JSON,
-walks the available images, decides what survives, writes `build/figures.json`,
-and rewrites figure references in `parsed/*.md`.
+A paper may appear in multiple chapters' `sources`. That's expected.
 
-### 6. Build the epub
+### 5. Write chapters in parallel (chapter-writer subagents)
+
+Read `build/outline.json`. **For each chapter, issue a Task call to
+`chapter-writer`, all dispatched in a single assistant message.** Each Task
+prompt should include:
+
+- `workdir` — the path.
+- `chapter_index` — the zero-based index of this chapter in the outline.
+- `chapter` — the chapter object from outline.json (inlined as JSON).
+- `persona_path` — same path as before.
+
+Each chapter-writer reads the source papers it needs (summaries and full
+parsed text via Read), then writes
+`<workdir>/build/chapters/<NN>-<slug>.md`. Wait for all to complete.
+
+This is the heaviest step — chapter-writers ingest full paper text. A
+typical 5-paper book takes 5–15 minutes here.
+
+### 6. Curate figures (figure-curator subagent — single call)
+
+Dispatch `figure-curator` with the workdir path. It reads each chapter,
+picks 0–3 figures from the chapter's source papers, and edits each chapter
+file to insert the figures with alt-text and captions in-line at the right
+anchor points.
+
+### 7. Build the epub
 
 Run:
 
@@ -86,25 +117,29 @@ Run:
 "$PY" "$PLUGIN/scripts/build_epub.py" --workdir "$WD"
 ```
 
-This assembles `build/manuscript.md` from preface + ordered parsed sections,
-renders cover + metadata, runs pandoc, then runs epubcheck inline. Output lands
-at `books/<slug>/book.epub`.
+This assembles `build/manuscript.md` as **preface → chapters in outline
+order → auto-generated bibliography**, renders the cover and metadata, runs
+pandoc, then runs epubcheck inline. Output lands at `books/<slug>/book.epub`.
 
-### 7. Report
+### 8. Report
 
-Report the final epub path. The Stop hook will pop open the books folder when
-the conversation ends, and the SubagentStop hook fires terminal-notifier when
-editorial-voice finishes (so the user can context-switch during synthesis).
+Report the final epub path. The Stop hook auto-opens it in Kindle Previewer
+(if installed) and fires a clickable notification linking to Send to Kindle.
 
 ## Important
 
-- In step 3, **dispatch all paper-summarizer Tasks in a single message**.
-  Multiple Task calls in one assistant turn run in parallel.
-- Never inline full paper markdown into the orchestrator context. The subagent
-  reads it from disk; you read the small JSON summary back, not the paper.
+- **In step 3, all paper-summarizer Tasks fire in one assistant message.**
+  Multiple Task calls in one turn run in parallel.
+- **In step 5, all chapter-writer Tasks fire in one assistant message.**
+  Same parallelism trick.
+- **Never inline full paper markdown into the orchestrator context.** Pass
+  paths to subagents and let them Read. The orchestrator should only ever
+  hold structured summaries and outline JSON.
 - If `fetch_source.py` reports `needs_manual_input: true` (DOI/IEEE/ACM
   without an accessible PDF), pause and tell the user to drop the PDF/tex
-  into `<source_path>/` before proceeding. Do not try to summarize an empty
-  source.
+  into `<source_path>/` before continuing.
 - If `build_epub.py` exits non-zero due to epubcheck errors, surface the
   errors and offer to run `/epub-doctor` on the produced epub.
+- Inline citations in chapters use `[<source_id>]` syntax that maps to the
+  bibliography entries. The build step preserves them as-is — pandoc renders
+  them as plain bracket text that the bibliography section anchors.

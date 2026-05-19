@@ -43,8 +43,12 @@ sitting in `books/<slug>/book.epub` ready to drag onto a Kindle.
   epub, writes alt-text, and rewrites figure references in the parsed markdown.
 
 **Hooks**
-- `Stop` — pop open the `books/` folder when the conversation ends *and* an
-  epub was just produced (mtime check, 120s window). No noise on unrelated chats.
+- `Stop` — when the conversation ends and a fresh epub exists in `books/`,
+  open it in **Kindle Previewer 3** (macOS, if installed) so you can review
+  the rendered book immediately. Falls back to opening the `books/` folder if
+  the previewer isn't available. Either way, fires a clickable notification
+  pointing at Send to Kindle. (mtime check, 120s window — silent on unrelated
+  chats.)
 - `SubagentStop` on `editorial-voice` — desktop notification when the long
   synthesis pass completes, so you can context-switch while it runs.
 
@@ -62,6 +66,14 @@ You only need these before running setup:
 
 You do **not** need to install pandoc, Java, cairo, or epubcheck yourself —
 `setup.sh` handles them.
+
+**Recommended (optional):** Install
+[Kindle Previewer 3](https://kdp.amazon.com/en_US/help/topic/G202131170) — a
+free desktop app from Amazon that simulates rendering on every Kindle device
+(Paperwhite, Scribe, Oasis, tablets). When installed, the Stop hook will open
+every freshly-built epub in it automatically. See the
+[Iterating with Kindle Previewer](#iterating-with-kindle-previewer) section
+below for the recommended workflow.
 
 ### Three steps
 
@@ -154,6 +166,41 @@ Most papyrus output lives under:
 - `cache/<arxiv-id>/` — content-addressed cache so re-fetches are free
 
 All three are gitignored.
+
+## Iterating with Kindle Previewer
+
+The tightest feedback loop for tuning a book — covers, persona voice, figure
+selection, TOC structure — is to preview locally before sending anything to
+your Kindle. Each Send-to-Kindle round-trip takes minutes for conversion +
+wireless delivery; the previewer is instant.
+
+**Install [Kindle Previewer 3](https://kdp.amazon.com/en_US/help/topic/G202131170)**
+(free from Amazon, macOS/Windows). Once installed, papyrus's Stop hook will
+open every freshly-built epub in it automatically — no manual step.
+
+**The iteration loop:**
+
+1. `/papyrus:arxiv-to-epub <ids> --name draft-v1` — build a first cut
+2. Stop hook auto-opens `books/draft-v1/book.epub` in Kindle Previewer
+3. Switch the device dropdown (Paperwhite → Scribe → tablet) to spot reflow
+   issues; check the TOC pane for nav correctness; verify the cover thumbnail
+4. Not happy? Rebuild with a different persona, more papers, or run
+   `/papyrus:epub-doctor books/draft-v1/book.epub` for structural fixes
+5. Only when it's good, drag the epub onto
+   [Send to Kindle](https://www.amazon.com/sendtokindle) (the Stop-hook
+   notification is a clickable shortcut to that page) — the cover is already
+   embedded, so don't upload `cover.png` separately
+
+**No Kindle Previewer?** The hook falls back to opening the `books/` folder
+in Finder/Explorer. Drag the `.epub` from there onto the Send-to-Kindle web
+page when you're ready.
+
+**Replacing a previous send:** Send to Kindle treats every upload as a new
+personal document, so re-uploading creates a duplicate rather than updating
+the existing copy (and your reading position doesn't carry over). To truly
+replace, delete the old entry from
+[Manage Your Content and Devices](https://www.amazon.com/hz/mycd/myx) first,
+then resend.
 
 ## Personas
 

@@ -50,42 +50,79 @@ sitting in `books/<slug>/book.epub` ready to drag onto a Kindle.
 
 ## Install
 
+### Prerequisites
+
+You only need these before running setup:
+
+- `python3` ≥ 3.10
+- `git`, `curl`, `unzip`
+- macOS: [Homebrew](https://brew.sh) / Linux: `apt` — setup uses them to install
+  pandoc, a JRE, cairo, and terminal-notifier
+- The Claude Code `claude` CLI on `$PATH` — required for `--persistent`
+
+You do **not** need to install pandoc, Java, cairo, or epubcheck yourself —
+`setup.sh` handles them.
+
+### Three steps
+
+**1. Clone**
+
 ```bash
 git clone https://github.com/plawanrath/papyrus.git
 cd papyrus
-./setup.sh
 ```
 
-`setup.sh` is idempotent. It:
-- creates `.venv/` and installs Python deps from `requirements.txt`
-- detects your package manager (brew on macOS, apt on Linux) and installs
-  pandoc, JRE, cairo, terminal-notifier as needed
-- downloads `epubcheck` into `.tools/` and writes `.papyrus.env`
-- runs `scripts/doctor.py` to verify everything resolved
-
-Register the plugin with Claude Code:
+**2. Run setup**
 
 ```bash
-# Ad-hoc (current session only):
-claude --plugin-dir "$(pwd)"
-
-# Persistent: add this directory to ~/.claude/settings.json under "plugins".
+./setup.sh --persistent
 ```
 
-## What you'll need
+`setup.sh` is idempotent — safe to re-run any time. It will:
 
-| Dependency | Required? | Notes |
-|---|---|---|
-| `python3` ≥ 3.10 | yes | venv lives in `.venv/` |
-| `pandoc` | yes | markdown ↔ epub conversion |
-| Java JRE | yes | runs `epubcheck` |
-| Cairo (libcairo) | yes | needed by `cairosvg` for the cover render |
-| `terminal-notifier` (macOS) / `notify-send` (Linux) | optional | notification hook no-ops if missing |
+- create `.venv/` and install Python dependencies from `requirements.txt`
+- install missing system tools via your package manager (on macOS you may be
+  prompted for an admin password for the Temurin JDK cask)
+- download `epubcheck` into `.tools/` and write `.papyrus.env`
+- run `scripts/doctor.py` to verify every dependency resolves
+- with `--persistent`: register papyrus with Claude Code (user scope) by
+  running `claude plugin marketplace add "$(pwd)"` followed by
+  `claude plugin install papyrus@papyrus --scope user`
 
-The setup script handles all of these on macOS (via brew) and Linux (via apt).
-On any other platform, install them yourself and re-run `./setup.sh`.
+Drop the `--persistent` flag if you'd rather load papyrus only on demand
+per session with `claude --plugin-dir "$(pwd)"`.
 
-Re-run `./bin/papyrus-python scripts/doctor.py` anytime to check the install.
+**3. Restart Claude Code**
+
+Exit any running `claude` session and start a fresh one. Plugins load at
+session start, so a new session is required after first install. You should
+see `papyrus@papyrus` in `claude plugin list` and the skills available as
+`/papyrus:<skill>`.
+
+### Verify
+
+In a fresh `claude` session, try the LLM-free smoke test:
+
+```text
+/papyrus:arxiv-fetch 2401.12345
+```
+
+If it reports a path under `working/_scratch/sources/2401.12345/`, you're set.
+
+You can re-run the install verifier outside of Claude any time:
+
+```bash
+./bin/papyrus-python scripts/doctor.py
+```
+
+### Uninstall
+
+```bash
+claude plugin uninstall papyrus@papyrus
+claude plugin marketplace remove papyrus
+# optional — wipe the installed deps inside the repo:
+rm -rf .venv .tools .papyrus.env
+```
 
 ## Usage
 

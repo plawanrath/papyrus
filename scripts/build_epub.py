@@ -28,12 +28,29 @@ import render_cover
 
 CITATION_RE = re.compile(r"\[([0-9]{4}\.[0-9]{4,5}(?:v\d+)?|doi-[a-z0-9\-]+|[a-z0-9_-]{4,})\]", re.IGNORECASE)
 
+# Matches a fenced code block (``` or ~~~), so citation linkifying can skip it.
+FENCE_RE = re.compile(r"(^|\n)(```|~~~).*?(\n\2|\Z)", re.DOTALL)
+
+
+def _normalize_id(source_id: str) -> str:
+    """Strip an arxiv version suffix so cites and anchors match.
+
+    `2401.12345v2` and `2401.12345` should resolve to the same reference.
+    Non-arxiv ids (doi-..., slugs) are returned unchanged.
+    """
+    return re.sub(r"v\d+$", "", source_id.strip())
+
+
+def _ref_anchor(source_id: str) -> str:
+    return "ref-" + _normalize_id(source_id)
+
 
 def assemble_manuscript(wd: mf.Workdir) -> Path:
     """Produce build/manuscript.md from sources of truth on every run.
 
-    Default (narrative) mode: preface + chapters in outline order + bibliography.
-    Falls back to anthology mode (preface + parsed papers + bibliography) only
+    Default (narrative) mode: preface + chapters in outline order + references.
+    Inline `[<id>]` citations are rewritten into links to the References table.
+    Falls back to anthology mode (preface + parsed papers + references) only
     when no synthesized chapters exist — that path keeps single-paper
     /epub-build working without going through the full pipeline.
 
@@ -42,16 +59,24 @@ def assemble_manuscript(wd: mf.Workdir) -> Path:
     """
     out = wd.build_dir() / "manuscript.md"
 
+    known_ids = {
+        _normalize_id(s["id"])
+        for s in wd.manifest.get("sources", [])
+        if s.get("id")
+    }
+
     pieces: list[str] = []
     preface = wd.build_dir() / "preface.md"
     if preface.exists():
-        pieces.append(preface.read_text(encoding="utf-8").rstrip() + "\n")
+        text = preface.read_text(encoding="utf-8").rstrip()
+        pieces.append(_linkify_citations(text, known_ids) + "\n")
 
     chapters = _ordered_chapters(wd)
     if chapters:
         for chapter_path in chapters:
             pieces.append("")
-            pieces.append(chapter_path.read_text(encoding="utf-8").rstrip() + "\n")
+            text = chapter_path.read_text(encoding="utf-8").rstrip()
+            pieces.append(_linkify_citations(text, known_ids) + "\n")
     else:
         # Anthology fallback: no synthesized chapters. Inline parsed papers in
         # the order specified by ordering.json (legacy) or manifest order.
@@ -73,10 +98,10 @@ def assemble_manuscript(wd: mf.Workdir) -> Path:
             for src in wd.manifest.get("sources", []):
                 _append_paper(pieces, wd, src["id"])
 
-    bib = _build_bibliography(wd)
-    if bib:
+    refs = _build_references(wd)
+    if refs:
         pieces.append("")
-        pieces.append(bib)
+        pieces.append(refs)
 
     out.write_text("\n".join(pieces), encoding="utf-8")
     return out
@@ -121,28 +146,132 @@ def _ordered_chapters(wd: mf.Workdir) -> list[Path]:
     return available
 
 
-def _build_bibliography(wd: mf.Workdir) -> str:
-    """Emit a Markdown bibliography section from the manifest.
+def _first_sentence(text: str) -> str:
+    """Return the first sentence of `text`, trimmed to a sane length."""
+    text = " ".join(text.split())
+    if not text:
+        return ""
+    m = re.search(r"(.+?[.!?])(\s|$)", text)
+    sentence = m.group(1) if m else text
+    if len(sentence) > 240:
+        sentence = sentence[:237].rstrip() + "…"
+    return sentence
 
-    Sources are listed in the order they appear in the manifest. Entries
-    include title, authors, URL, and the canonical source_id (so inline
-    citations like `[2401.12345]` map cleanly to a bibliography entry).
+
+def _source_blurb(wd: mf.Workdir, src: dict) -> str:
+    """One-line description of a paper for the References table.
+
+    Prefers the summary's `one_line` field; falls back to the first
+    contribution, then the first sentence of the method, then the title.
+    Works even when no summary exists (single-paper /epub-build).
+    """
+    sid = src.get("id", "")
+    summary_path = wd.summaries_dir() / f"{sid}.json"
+    if summary_path.exists():
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            summary = {}
+        one_line = (summary.get("one_line") or "").strip()
+        if one_line:
+            return one_line
+        contributions = summary.get("contributions") or []
+        if contributions and isinstance(contributions[0], str) and contributions[0].strip():
+            return _first_sentence(contributions[0])
+        method = (summary.get("method") or "").strip()
+        if method:
+            return _first_sentence(method)
+    return (src.get("title") or sid).strip()
+
+
+def _source_url(src: dict) -> str:
+    """Best-effort canonical URL for a source row."""
+    url = (src.get("url") or "").strip()
+    if url:
+        return url
+    sid = src.get("id", "")
+    # arxiv ids look like 2401.12345 (optionally with a vN suffix).
+    if re.fullmatch(r"\d{4}\.\d{4,5}(v\d+)?", sid):
+        return f"https://arxiv.org/abs/{sid}"
+    return ""
+
+
+def _md_cell(text: str) -> str:
+    """Neutralize a string for safe inclusion in a Markdown pipe-table cell."""
+    text = " ".join(text.split())
+    for ch in ("\\", "|", "*", "_", "[", "]", "<", ">", "`"):
+        text = text.replace(ch, "\\" + ch)
+    return text
+
+
+def _build_references(wd: mf.Workdir) -> str:
+    """Emit a References section as an anchored Markdown table.
+
+    Each row's id cell carries a pandoc span identifier (`{#ref-<id>}`) so the
+    inline `[<id>]` citations rewritten by `_linkify_citations` resolve to it —
+    crucially, pandoc rewrites these fragment links to the right per-chapter
+    XHTML file in the epub (raw-HTML anchors do not get that treatment). The
+    description column gives the reader a one-line sense of what each paper is
+    about, so citations read as something meaningful rather than bare ids.
     """
     sources = wd.manifest.get("sources") or []
     if not sources:
         return ""
-    lines = ["# Bibliography\n"]
+
+    rows = []
     for src in sources:
         sid = src.get("id", "")
-        title = (src.get("title") or sid).strip()
-        authors = ", ".join(src.get("authors") or []) or "Unknown authors"
-        url = (src.get("url") or "").strip()
-        # Use [sid] as the anchor label so inline `[sid]` citations match.
-        entry = f"- **[{sid}]** {authors}. *{title}*."
+        if not sid:
+            continue
+        is_arxiv = bool(re.fullmatch(r"\d{4}\.\d{4,5}(v\d+)?", sid))
+        label = _md_cell("arXiv:" + sid if is_arxiv else sid)
+        url = _source_url(src)
+        anchor = _ref_anchor(sid)
+        # A span carrying the id, wrapping an external link when we have a URL.
         if url:
-            entry += f" [{url}]({url})"
-        lines.append(entry)
-    return "\n".join(lines) + "\n"
+            id_cell = f"[[{label}]({url})]{{#{anchor}}}"
+        else:
+            id_cell = f"[{label}]{{#{anchor}}}"
+
+        blurb = _md_cell(_source_blurb(wd, src))
+        authors = _md_cell(", ".join(src.get("authors") or []))
+        desc = f"*{blurb}*"
+        if authors:
+            desc += f" — {authors}"
+        rows.append(f"| {id_cell} | {desc} |")
+
+    table = "\n".join(
+        ["| ID | Source |", "|----|--------|", *rows]
+    )
+    return "# References\n\n::: {.references-table}\n\n" + table + "\n\n:::\n"
+
+
+def _linkify_citations(text: str, known_ids: set[str]) -> str:
+    """Turn inline `[<id>]` cites into links to the References table.
+
+    Emits pandoc-native Markdown links (`[\\[id\\]](#ref-id)`) so the epub
+    writer rewrites the fragment to the correct per-chapter file. Only rewrites
+    tokens whose normalized id is a known source (so array indices, code, and
+    unrelated brackets are left alone). Fenced code blocks are skipped entirely.
+    """
+    if not known_ids:
+        return text
+
+    def replace(match: re.Match) -> str:
+        raw = match.group(1)
+        if _normalize_id(raw) not in known_ids:
+            return match.group(0)
+        return f"[\\[{raw}\\]](#{_ref_anchor(raw)})"
+
+    # Split on fenced code blocks; only linkify the prose segments.
+    out: list[str] = []
+    last = 0
+    for fence in FENCE_RE.finditer(text):
+        out.append(CITATION_RE.sub(replace, text[last:fence.start()]))
+        out.append(fence.group(0))
+        last = fence.end()
+    out.append(CITATION_RE.sub(replace, text[last:]))
+    return "".join(out)
 
 
 def _append_paper(pieces: list[str], wd: mf.Workdir, source_id: str) -> None:

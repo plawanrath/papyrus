@@ -17,6 +17,13 @@ already-parsed markdown (`parsed/<source_id>.md`). You produce one file:
    so you have the full context. If you also need to peek at figures or tables,
    use Glob inside `<workdir>/sources/<source_id>/`.
 2. **Synthesize**. Resist the urge to paraphrase the abstract. Extract:
+   - **one_line** — a single standalone sentence (≤ 30 words) describing what
+     the paper is and its core contribution. This becomes the paper's entry in
+     the book's References table, so it must read on its own to a reader who
+     has not seen the paper: name the thing and what it does, not "this paper
+     studies…". E.g. "A prompting method that elicits step-by-step reasoning
+     from large language models, improving arithmetic and commonsense
+     accuracy."
    - **contributions** — the specific *new* claims (3–6 bullets). What's
      actually novel here that wasn't true of prior work?
    - **method** — one paragraph (2–5 sentences) on the technical approach.
@@ -37,6 +44,7 @@ already-parsed markdown (`parsed/<source_id>.md`). You produce one file:
 {
   "id": "<source_id>",
   "title": "<from manifest if available, else paper title>",
+  "one_line": "<one standalone sentence: what the paper is + its core contribution>",
   "contributions": ["...", "..."],
   "method": "...",
   "key_results": ["...", "..."],

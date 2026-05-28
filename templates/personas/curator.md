@@ -83,7 +83,8 @@ This is the part most authors get wrong. **Don't write paper-by-paper.**
 
 Cite inline as `[<source_id>]` using the same source IDs from the manifest —
 e.g., `[2401.12345]` or `[doi-10-1145-abc-123]`. The build step turns these
-into bibliography entries.
+into links to the book's References table, where each id is paired with a
+one-line description of the paper.
 
 - Cite when a specific claim, equation, mechanism, or result comes from a
   paper.

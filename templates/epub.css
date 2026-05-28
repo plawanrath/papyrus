@@ -61,3 +61,12 @@ th, td { padding: 0.3em 0.6em; border: 1px solid #ccc; }
 th { background: #f0f0f0; }
 
 .references p { text-indent: 0; margin-left: 1.5em; text-indent: -1.5em; }
+
+/* References table: id + one-line description of each source paper. */
+.references-table { width: 100%; font-size: 0.9em; }
+.references-table td { vertical-align: top; }
+.references-table td:first-child { white-space: nowrap; font-family: "Helvetica Neue", "Helvetica", "Arial", sans-serif; }
+
+/* Inline citations link into the References table; keep them unobtrusive.
+   (pandoc rewrites the href to a cross-file path ending in #ref-<id>.) */
+a[href*="#ref-"] { text-decoration: none; color: inherit; font-style: normal; }

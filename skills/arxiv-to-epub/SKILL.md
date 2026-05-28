@@ -10,7 +10,7 @@ raw-LaTeX URLs), you produce a polished epub at `books/<slug>/book.epub`.
 **This is NOT an anthology.** The book's body is *not* the original papers
 stitched together. Chapter-writer subagents synthesize across papers to
 produce narrative technical prose that teaches concepts; the original papers
-appear only as bibliography entries. If you find yourself appending parsed
+appear only as References-table entries. If you find yourself appending parsed
 paper markdown verbatim into the book, you've taken a wrong turn.
 
 ## Inputs
@@ -118,8 +118,9 @@ Run:
 ```
 
 This assembles `build/manuscript.md` as **preface → chapters in outline
-order → auto-generated bibliography**, renders the cover and metadata, runs
-pandoc, then runs epubcheck inline. Output lands at `books/<slug>/book.epub`.
+order → auto-generated References table**, rewrites inline `[<id>]` citations
+into links to that table, renders the cover and metadata, runs pandoc, then
+runs epubcheck inline. Output lands at `books/<slug>/book.epub`.
 
 ### 8. Report
 
@@ -140,6 +141,8 @@ Report the final epub path. The Stop hook auto-opens it in Kindle Previewer
   into `<source_path>/` before continuing.
 - If `build_epub.py` exits non-zero due to epubcheck errors, surface the
   errors and offer to run `/epub-doctor` on the produced epub.
-- Inline citations in chapters use `[<source_id>]` syntax that maps to the
-  bibliography entries. The build step preserves them as-is — pandoc renders
-  them as plain bracket text that the bibliography section anchors.
+- Inline citations in chapters use `[<source_id>]` syntax. The build step
+  rewrites each known `[<id>]` into a link to the References table at the back
+  of the book, where every id is paired with a one-line description of the
+  paper (pulled from the summary's `one_line` field). Unknown ids are left as
+  plain text, so a typo never produces a dead link.

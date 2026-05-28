@@ -82,7 +82,8 @@ The orchestrator's prompt includes:
   algorithms. Don't sanitize away the technical detail — the reader wants it.
 - **Cite inline.** When a specific claim, equation, or result comes from a
   paper, cite it inline using `[<source_id>]` — e.g., `[2401.12345]`. The
-  build step turns these into proper bibliography references. Cite every
+  build step turns these into links to the book's References table, where
+  each id is paired with a one-line description of the paper. Cite every
   factual claim drawn from a paper; don't cite every sentence.
 - **Acknowledge what's contested.** If two source papers disagree, name the
   disagreement and what's at stake. Don't smooth it over.
